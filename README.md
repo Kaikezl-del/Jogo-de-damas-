@@ -1,1 +1,184 @@
 # Jogo-de-damas-
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Damas | Kaike</title>
+<style>
+:root{--bg:#e8eef4;--ink:#16303d;--mut:#4f6b7a;--light:#f3e7c9;--dark:#1f5668;--p1:#fbf7ec;--p2:#b3263e;--acc:#f0a202;--frame:#16303d}
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;background:var(--bg);color:var(--ink);font-family:"Trebuchet MS",Verdana,sans-serif;display:flex;flex-direction:column;align-items:center;padding:22px 12px}
+h1{margin:0 0 4px;font-size:1.8rem;letter-spacing:.5px}
+.sub{margin:0 0 14px;color:var(--mut);font-size:.95rem;text-align:center}
+#bar{display:flex;gap:10px;flex-wrap:wrap;justify-content:center;margin-bottom:10px}
+button{background:var(--ink);color:#fff;border:0;border-radius:8px;padding:9px 15px;font-weight:700;cursor:pointer;font-size:.9rem;font-family:inherit}
+button.alt{background:#fff;color:var(--ink);border:2px solid var(--ink)}
+button:focus-visible{outline:3px solid var(--acc);outline-offset:2px}
+#status{font-weight:700;margin:6px 0 10px;min-height:1.5em;text-align:center}
+#board{display:grid;grid-template-columns:repeat(8,1fr);width:min(92vw,480px);aspect-ratio:1;border:8px solid var(--frame);border-radius:6px;overflow:hidden;box-shadow:0 12px 28px #16303d55}
+.sq{display:flex;align-items:center;justify-content:center;position:relative}
+.sq.l{background:var(--light)}.sq.d{background:var(--dark)}
+.sq.sel{box-shadow:inset 0 0 0 4px var(--acc)}
+.sq.dest::after{content:"";width:30%;height:30%;border-radius:50%;background:var(--acc);opacity:.9;position:absolute}
+.pc{width:78%;height:78%;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:clamp(14px,5vw,26px);box-shadow:inset 0 -5px 0 #0003,0 3px 6px #0006;transition:transform .15s}
+.pc.p1{background:var(--p1);color:#9a6b00}.pc.p2{background:var(--p2);color:#ffe08a}
+.sq.can .pc{cursor:pointer}.sq.can .pc:hover{transform:scale(1.08)}
+.sq.dest{cursor:pointer}
+#score{display:flex;gap:22px;margin-top:12px;color:var(--mut);font-size:.95rem}
+.rules{max-width:480px;margin-top:12px;color:var(--mut);font-size:.85rem;text-align:center;line-height:1.5}
+@media (prefers-reduced-motion:reduce){.pc{transition:none}}
+</style>
+</head>
+<body>
+<h1>Jogo de Damas</h1>
+<p class="sub">Clique em uma peça e depois na casa de destino.</p>
+<div id="bar">
+  <button id="mode" class="alt">Modo: contra o computador</button>
+  <button id="new">Novo jogo</button>
+</div>
+<div id="status"></div>
+<div id="board" role="grid" aria-label="Tabuleiro de damas"></div>
+<div id="score"><span id="s1"></span><span id="s2"></span></div>
+<p class="rules">Você joga com as peças claras. A captura é obrigatória e é possível capturar várias peças em sequência. Ao chegar na última linha, a peça vira dama (♛) e anda também para trás.</p>
+
+<script>
+let B, turn, sel, mv, over, cpu = true;
+const $ = id => document.getElementById(id);
+const ins = (r, c) => r >= 0 && r < 8 && c >= 0 && c < 8;
+
+function dirs(p) {
+  return p.k ? [[-1,-1],[-1,1],[1,-1],[1,1]] : p.o == 1 ? [[-1,-1],[-1,1]] : [[1,-1],[1,1]];
+}
+
+function jumps(b, r, c, p, caps) {
+  const res = [];
+  for (const [dr, dc] of dirs(p)) {
+    const mr = r + dr, mc = c + dc, lr = r + 2 * dr, lc = c + 2 * dc;
+    if (!ins(lr, lc)) continue;
+    const m = b[mr][mc];
+    if (m && m.o !== p.o && !b[lr][lc] && !caps.some(x => x[0] == mr && x[1] == mc)) {
+      const nc = caps.concat([[mr, mc]]);
+      const sub = jumps(b, lr, lc, p, nc);
+      if (sub.length) res.push(...sub); else res.push({ end: [lr, lc], caps: nc });
+    }
+  }
+  return res;
+}
+
+function allMoves(b, o) {
+  const J = [], S = [];
+  for (let r = 0; r < 8; r++) for (let c = 0; c < 8; c++) {
+    const p = b[r][c];
+    if (!p || p.o != o) continue;
+    b[r][c] = null;
+    jumps(b, r, c, p, []).forEach(m => J.push({ fr: r, fc: c, er: m.end[0], ec: m.end[1], caps: m.caps }));
+    b[r][c] = p;
+    for (const [dr, dc] of dirs(p)) {
+      const nr = r + dr, nc = c + dc;
+      if (ins(nr, nc) && !b[nr][nc]) S.push({ fr: r, fc: c, er: nr, ec: nc, caps: [] });
+    }
+  }
+  return J.length ? J : S;
+}
+
+function apply(b, m) {
+  const p = b[m.fr][m.fc];
+  b[m.fr][m.fc] = null;
+  m.caps.forEach(([r, c]) => b[r][c] = null);
+  b[m.er][m.ec] = p;
+  if ((p.o == 1 && m.er == 0) || (p.o == 2 && m.er == 7)) p.k = 1;
+}
+
+function init() {
+  B = [];
+  for (let r = 0; r < 8; r++) {
+    const row = [];
+    for (let c = 0; c < 8; c++) {
+      if ((r + c) % 2 == 1 && r < 3) row.push({ o: 2, k: 0 });
+      else if ((r + c) % 2 == 1 && r > 4) row.push({ o: 1, k: 0 });
+      else row.push(null);
+    }
+    B.push(row);
+  }
+  turn = 1; sel = null; over = false;
+  mv = allMoves(B, 1);
+  render();
+}
+
+function play(m) {
+  apply(B, m);
+  sel = null;
+  turn = turn == 1 ? 2 : 1;
+  mv = allMoves(B, turn);
+  if (!mv.length) over = true;
+  render();
+  if (!over && cpu && turn == 2) setTimeout(ai, 650);
+}
+
+function ai() {
+  const ms = allMoves(B, 2);
+  if (!ms.length) return;
+  let best = null, bs = -99;
+  ms.forEach(m => {
+    const b = B.map(r => r.map(x => x && { ...x }));
+    const wasK = b[m.fr][m.fc].k;
+    apply(b, m);
+    const opp = allMoves(b, 1).reduce((a, x) => Math.max(a, x.caps.length), 0);
+    const s = m.caps.length * 3 - opp * 2 + (!wasK && b[m.er][m.ec].k ? 2 : 0) + Math.random();
+    if (s > bs) { bs = s; best = m; }
+  });
+  play(best);
+}
+
+function click(r, c) {
+  if (over || (cpu && turn == 2)) return;
+  if (sel) {
+    const m = mv.find(x => x.fr == sel[0] && x.fc == sel[1] && x.er == r && x.ec == c);
+    if (m) return play(m);
+  }
+  sel = mv.some(x => x.fr == r && x.fc == c) ? [r, c] : null;
+  render();
+}
+
+function render() {
+  const own = new Set(mv.map(m => m.fr + ',' + m.fc));
+  const dst = new Set(sel ? mv.filter(m => m.fr == sel[0] && m.fc == sel[1]).map(m => m.er + ',' + m.ec) : []);
+  let h = '', n1 = 0, n2 = 0;
+  for (let r = 0; r < 8; r++) for (let c = 0; c < 8; c++) {
+    const p = B[r][c], k = r + ',' + c;
+    if (p) p.o == 1 ? n1++ : n2++;
+    const cls = 'sq ' + ((r + c) % 2 ? 'd' : 'l')
+      + (sel && sel[0] == r && sel[1] == c ? ' sel' : '')
+      + (dst.has(k) ? ' dest' : '')
+      + (!over && p && p.o == turn && own.has(k) && (!cpu || turn == 1) ? ' can' : '');
+    h += `<div class="${cls}" data-r="${r}" data-c="${c}">${p ? `<div class="pc p${p.o}">${p.k ? '♛' : ''}</div>` : ''}</div>`;
+  }
+  $('board').innerHTML = h;
+  $('s1').textContent = 'Claras: ' + n1;
+  $('s2').textContent = 'Vermelhas: ' + n2;
+  let t;
+  if (over) {
+    const w = turn == 1 ? 2 : 1;
+    t = cpu ? (w == 1 ? 'Você venceu! 🎉' : 'O computador venceu. Tente de novo!') : (w == 1 ? 'As claras venceram! 🎉' : 'As vermelhas venceram! 🎉');
+  } else {
+    t = cpu ? (turn == 1 ? 'Sua vez' : 'Computador pensando...') : (turn == 1 ? 'Vez das claras' : 'Vez das vermelhas');
+    if (mv[0] && mv[0].caps.length) t += ' (captura obrigatória)';
+  }
+  $('status').textContent = t;
+}
+
+$('board').onclick = e => {
+  const s = e.target.closest('.sq');
+  if (s) click(+s.dataset.r, +s.dataset.c);
+};
+$('new').onclick = init;
+$('mode').onclick = () => {
+  cpu = !cpu;
+  $('mode').textContent = cpu ? 'Modo: contra o computador' : 'Modo: 2 jogadores';
+  init();
+};
+init();
+</script>
+</body>
+</html>
